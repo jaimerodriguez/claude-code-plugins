@@ -23,18 +23,18 @@
 //
 // Persistence: two kinds of record in $.store, never written on every event.
 // The session's running total is one record under `session:<id>`, written
-// every `saveEvery` turns, at session.end, and by the commands. session.start
+// every `saveEveryNNTurns` turns, at session.end, and by the commands. session.start
 // reads it back, so a resumed session or a reloaded module continues its
 // count. Each month's tally is one record under `month:<YYYY-MM>`: at every
 // save, what the session added since its last save is banked into the month
 // of the save, and the session record notes how much is banked, so nothing is
-// counted twice. Session records are short-lived (`keepDays`, 14 by default;
+// counted twice. Session records are short-lived (`keepSessionDetailsNNDays`, 14 by default;
 // /receipt-clear drops them on demand) and the months stay (12 kept), so the
 // store stays small whatever the session count.
 //
 // Why bank, instead of summing the session records when a month is asked for:
 // the two kinds of record have different lives. Session records are dropped
-// after `keepDays` and by /receipt-clear, so by the time a month is asked for
+// after `keepSessionDetailsNNDays` and by /receipt-clear, so by the time a month is asked for
 // most of its sessions are gone; the month has to be written while they are
 // still here. And it has to be written a little at a time, at every save, not
 // once at session.end: a session can be killed before session.end fires,
@@ -56,11 +56,12 @@
 // At session.start the module prints a trace to the console: the host's
 // process id, what the session's record had banked, and every month kept.
 //
-// Options (plugin.json userConfig, set in /config): `session`, on by default,
-// adds the session's running total; `agents`, on by default, adds a line for
-// the subagent runs the turn made; `saveEvery`, 10 by default, is how many
-// turns pass between saves (0: only at session end and on the commands);
-// `keepDays`, 14 by default, is how long session records are kept;
+// Options (plugin.json userConfig, set in /config): `showSessionTotals`, on
+// by default, adds the session's running total; `showSubAgentDetails`, on by
+// default, adds a line for the subagent runs the turn made; `saveEveryNNTurns`,
+// 10 by default, is how many turns pass between saves (0: only at session end
+// and on the commands); `keepSessionDetailsNNDays`, 14 by default, is how long
+// session records are kept;
 // `allowEmptyReceipts`, off by default, prints a receipt (and counts the
 // turn) when the turn reported no usage and moved no ledger, such as an
 // interrupt before any response; its token counts read 0.
@@ -102,10 +103,10 @@ let session = emptySession();
 let banked = emptyBanked(null);
 
 export function register(on, options) {
-  showSession = options?.session !== false;
-  showAgents = options?.agents !== false;
-  saveEvery = Math.max(0, Math.floor(Number(options?.saveEvery ?? SAVE_EVERY_DEFAULT)) || 0);
-  keepDays = Math.max(1, Math.floor(Number(options?.keepDays ?? KEEP_DAYS_DEFAULT)) || KEEP_DAYS_DEFAULT);
+  showSession = options?.showSessionTotals !== false;
+  showAgents = options?.showSubAgentDetails !== false;
+  saveEvery = Math.max(0, Math.floor(Number(options?.saveEveryNNTurns ?? SAVE_EVERY_DEFAULT)) || 0);
+  keepDays = Math.max(1, Math.floor(Number(options?.keepSessionDetailsNNDays ?? KEEP_DAYS_DEFAULT)) || KEEP_DAYS_DEFAULT);
   allowEmptyReceipts = options?.allowEmptyReceipts === true;
 
   on("session.start", async ($, e, next) => {

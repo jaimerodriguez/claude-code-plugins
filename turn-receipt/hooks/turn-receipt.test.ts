@@ -152,7 +152,7 @@ test("charges each turn only the ledger's movement and keeps a session total", a
   expect(second.text).toContain("session  | 2 turns  | 300 tokens  | $2.60");
 });
 
-test("shows the turn alone when the session option is off", { options: { session: false } }, async ($, on) => {
+test("shows the turn alone when the session option is off", { options: { showSessionTotals: false } }, async ($, on) => {
   const state = { usd: 0 };
   ledger(on, state);
   await $.session.start(START);
@@ -199,7 +199,7 @@ test("splits a turn between the main loop and its subagents", async ($, on) => {
   expect(next.text).toContain("session  | 2 turns  | 2 agent runs  | 1.6k tokens  | $0.090");
 });
 
-test("folds subagents into the turn when the agents option is off", { options: { agents: false } }, async ($, on) => {
+test("folds subagents into the turn when the agents option is off", { options: { showSubAgentDetails: false } }, async ($, on) => {
   const state = { usd: 0 };
   ledger(on, state);
   await $.session.start(START);
@@ -230,7 +230,7 @@ test("says cost n/a where the host keeps no ledger", async ($, on) => {
   expect(session).toBe("session  | 1 turn  | 1 agent run  | 615 tokens  | cost n/a");
 });
 
-test("saves the session's total every N turns, at the end, and on /receipt", { options: { saveEvery: 2 } }, async ($, on) => {
+test("saves the session's total every N turns, at the end, and on /receipt", { options: { saveEveryNNTurns: 2 } }, async ($, on) => {
   const state = { usd: 0 };
   ledger(on, state);
   await $.session.start(START);
@@ -269,7 +269,7 @@ test("saves the session's total every N turns, at the end, and on /receipt", { o
   expect(store.get("session:s1")).toMatchObject({ turns: 5, usd: 0.04 });
 });
 
-test("does not save a session that has nothing in it", { options: { saveEvery: 1 } }, async ($, on) => {
+test("does not save a session that has nothing in it", { options: { saveEveryNNTurns: 1 } }, async ($, on) => {
   const state = { usd: 0 };
   ledger(on, state);
   await $.session.start(START);
@@ -306,7 +306,7 @@ test("continues a saved session's count after a reload or resume", async ($, on)
   expect(r.text).toContain("session  | 8 turns  | 2 agent runs  | 2.1k tokens  | $1.10");
 });
 
-test("totals the sessions saved in the last N days", { options: { keepDays: 90 } }, async ($, on) => {
+test("totals the sessions saved in the last N days", { options: { keepSessionDetailsNNDays: 90 } }, async ($, on) => {
   const state = { usd: 0.5 };
   const rec = (id: string, daysAgo: number, turns: number, usd: number) => ({
     id, startedAt: 0, savedAt: NOW - daysAgo * DAY, turns, agentRuns: 1, tokens: usage(1000, 100), agentTokens: usage(0, 0), usd,
@@ -332,7 +332,7 @@ test("totals the sessions saved in the last N days", { options: { keepDays: 90 }
   const none = await $.command.run(run("receipt-total", "1"));
   expect(none.text).toContain("Last 1 day: 1 session");
 
-  // The 100-day-old record was pruned at session start (keepDays 90); unrelated keys stay.
+  // The 100-day-old record was pruned at session start (keepSessionDetailsNNDays 90); unrelated keys stay.
   expect(store.get("session:old")).toBeUndefined();
   expect(store.get("other:key")).toEqual({ kept: true });
 });
@@ -357,7 +357,7 @@ test("receipts and counts a turn without usage when allowEmptyReceipts is on", {
   expect(next.text.split("\n")[1]).toBe("session  | 2 turns  | 15 tokens  | cost n/a");
 });
 
-test("banks each save's new turns into the month's tally once", { options: { saveEvery: 2 } }, async ($, on) => {
+test("banks each save's new turns into the month's tally once", { options: { saveEveryNNTurns: 2 } }, async ($, on) => {
   const state = { usd: 0 };
   ledger(on, state);
   await $.session.start(START);
@@ -444,7 +444,7 @@ test("a record saved before the monthly tally banks from zero", async ($, on) =>
   expect(store.get(`month:${MONTH}`)).toMatchObject({ sessions: 1, turns: 4, usd: 2.5, tokens: tok(400, 80) });
 });
 
-test("drops old session records at start and on /receipt-clear, keeping the months", { options: { keepDays: 3 } }, async ($, on) => {
+test("drops old session records at start and on /receipt-clear, keeping the months", { options: { keepSessionDetailsNNDays: 3 } }, async ($, on) => {
   const state = { usd: 0 };
   const rec = (id: string, daysAgo: number) => ({
     id, startedAt: 0, savedAt: NOW - daysAgo * DAY, turns: 2, agentRuns: 0, tokens: tok(100, 10), agentTokens: tok(0, 0), usd: 0.1,
@@ -460,7 +460,7 @@ test("drops old session records at start and on /receipt-clear, keeping the mont
   });
   await $.session.start(START);
 
-  // keepDays 3: the 5-day-old session goes; months stay for 12 months.
+  // keepSessionDetailsNNDays 3: the 5-day-old session goes; months stay for 12 months.
   expect(store.get("session:old")).toBeUndefined();
   expect(store.get("session:recent")).not.toBeUndefined();
   expect(store.get("month:1960-01")).toBeUndefined();

@@ -2,6 +2,17 @@
 
 All notable changes to this plugin are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-10-12
+
+### Added
+
+- A `LICENSE` file in this folder with the Apache License 2.0 text, which the sources' headers refer to. The rest of the repository is MIT.
+
+### Changed
+
+- The four `userConfig` options are renamed for clarity: `session` is now `showSessionTotals`, `agents` is `showSubAgentDetails`, `saveEvery` is `saveEveryNNTurns` and `keepDays` is `keepSessionDetailsNNDays`. Their `/config` titles are reworded to match. `allowEmptyReceipts` is unchanged.
+- The plugin's description in the manifest and in the marketplace now lists the four commands. The author is Jaime Rodriguez.
+
 ## [0.2.3] - 2026-10-09
 
 ### Added

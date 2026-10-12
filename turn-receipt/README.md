@@ -45,7 +45,7 @@ The numbers are real, not estimated. The token counts come from the `turn.comple
 | Command | What it does |
 |---------|--------------|
 | `/receipt` | Shows this session's turns, subagent runs, tokens and dollars, and saves them. |
-| `/receipt-total [days]` | Sums every session record saved in the last N days, the kept days (`keepDays`, 14 by default) when not given: sessions, turns, subagent runs, tokens and dollars. The current session is saved first, so it is counted. |
+| `/receipt-total [days]` | Sums every session record saved in the last N days, the kept days (`keepSessionDetailsNNDays`, 14 by default) when not given: sessions, turns, subagent runs, tokens and dollars. The current session is saved first, so it is counted. |
 | `/receipt-month [YYYY-MM]` | Shows a month's tally: sessions, turns, subagent runs, tokens and dollars. This month when not given, followed by one line per earlier month kept. The current session is saved first, so its latest turns are in. |
 | `/receipt-clear` | Saves this session, then drops every other session record. The monthly tallies stay. |
 
@@ -71,24 +71,24 @@ Five options, declared in the manifest's `userConfig`. Each is a row in `/config
 
 | Option | `/config` row | Type | Default | What it does |
 |--------|---------------|------|---------|--------------|
-| `session` | Session total | boolean | `true` | Adds the session line to each receipt. |
-| `agents` | Subagent line | boolean | `true` | Adds the agents line when the turn ran subagents. Off, the subagents' dollars are folded into the receipt line's figure, so it is the whole turn's. |
-| `saveEvery` | Save every N turns | number | `10` | Main-loop turns between saves of the session's record. A turn is one prompt through to Claude's final answer, whatever it ran inside; subagent runs do not count. `0` saves only at session end and on the commands. |
-| `keepDays` | Keep session records for N days | number | `14` | How long session records are kept before `session.start` drops them. The monthly tallies are kept apart, for 12 months, so a short window loses nothing from them. |
+| `showSessionTotals` | Show Session Totals | boolean | `true` | Adds the session line to each receipt. |
+| `showSubAgentDetails` | Show Subagent Details | boolean | `true` | Adds the agents line when the turn ran subagents. Off, the subagents' dollars are folded into the receipt line's figure, so it is the whole turn's. |
+| `saveEveryNNTurns` | Save every NN turns | number | `10` | Saves the session's record every NN main-loop turns. A turn is one prompt through to Claude's final answer, whatever it ran inside; subagent runs do not count. If the session crashes or is force-terminated, the interim saves keep most of its data: you lose at most those NN turns. `0` saves only at session end and on the commands. |
+| `keepSessionDetailsNNDays` | Keep detailed session records for NN days | number | `14` | How long session records are kept before `session.start` drops them. The monthly tallies are kept apart, for 12 months, so a short window loses nothing from them. |
 | `allowEmptyReceipts` | Allow empty receipts | boolean | `false` | Also prints a receipt, and counts the turn, when the turn reported no usage and moved no ledger: an interrupt before any response, an API error. Its token counts read `0`, so the line keeps its shape for anything parsing it. Off, such a turn gets no receipt and is not counted. On, every turn has a receipt, which helps when matching them against other logs. |
 
-With `session` and `agents` off, the receipt is one line, the turn alone:
+With `showSessionTotals` and `showSubAgentDetails` off, the receipt is one line, the turn alone:
 
 ```text
 receipt  | in 200  | out 50  | cache read 13.9k  | $0.080  (claude-sonnet-4-5-20250929)
 ```
 
-The same four in `~/.claude/settings.json` (project settings are not read for plugin options):
+The options in `~/.claude/settings.json` (project settings are not read for plugin options):
 
 ```json
 "pluginConfigs": {
   "turn-receipt": {
-    "options": { "session": true, "agents": true, "saveEvery": 10, "keepDays": 14, "allowEmptyReceipts": false }
+    "options": { "showSessionTotals": true, "showSubAgentDetails": true, "saveEveryNNTurns": 10, "keepSessionDetailsNNDays": 14, "allowEmptyReceipts": false }
   }
 }
 ```
@@ -158,7 +158,7 @@ Run these from the repository root. All three must pass before a commit.
    claude plugin test ./turn-receipt
    ```
 
-   Exits 1 when a test fails. To test an option value, pass it to the test: `test(name, { options: { session: false } }, body)`. Left out, the plugin gets its manifest's defaults.
+   Exits 1 when a test fails. To test an option value, pass it to the test: `test(name, { options: { showSessionTotals: false } }, body)`. Left out, the plugin gets its manifest's defaults.
 
 3. **Type-check.** Claude Code writes the plugin's TypeScript types to `.claude-plugin/types/` each time it loads the plugin (interactive or headless). Nothing generates them otherwise, so run the plugin once first (see the next section), then:
 
@@ -186,7 +186,7 @@ Point `--debug-file` outside the repository: Claude Code also writes a `latest` 
 claude --plugin-dir ./turn-receipt
 ```
 
-In an interactive session that folder is watched. Saving a file reloads the hooks module: `register` runs again, `session.start` fires again, and the module's own variables start over. The session's counters are read back from the saved record on reload, so at most `saveEvery` turns of the count are lost. Values in `$.store` are the host's and survive a reload.
+In an interactive session that folder is watched. Saving a file reloads the hooks module: `register` runs again, `session.start` fires again, and the module's own variables start over. The session's counters are read back from the saved record on reload, so at most `saveEveryNNTurns` turns of the count are lost. Values in `$.store` are the host's and survive a reload.
 
 Where no flag can be given (a session the desktop app starts), set `CLAUDE_CODE_PLUGIN_DIRS` to the folder's absolute path in the `env` block of `~/.claude/settings.json`.
 
@@ -214,7 +214,7 @@ If the plugin is installed from this repository's folder as a local marketplace 
 
 | Hook | What it does |
 |------|--------------|
-| `session.start` | Registers the four commands, reads the ledger once (so a resumed session's earlier spend is not billed to its first turn), loads this session's saved record, and prunes session records older than `keepDays` and months older than 12. |
+| `session.start` | Registers the four commands, reads the ledger once (so a resumed session's earlier spend is not billed to its first turn), loads this session's saved record, and prunes session records older than `keepSessionDetailsNNDays` and months older than 12. |
 | `agent.spawn` | Reads the ledger and credits the movement to the main loop, then lets the spawn go on. |
 | `turn.complete` | A subagent's run (`agentId` set): credits the ledger's movement and the run's tokens to the agents. The main loop's turn: credits the movement to the main loop, returns the receipt as the hook's text, which the engine shows beneath the answer, starts the next turn's count, and saves every N turns. |
 | `session.end` | Banks into the month and saves the record one last time. |
@@ -236,7 +236,7 @@ A foreground subagent blocks the main loop while it runs, so for those the split
 
 The **session record**, under `session:<id>`, is the session's running total: the session id, when it began, when it was saved, turns, subagent runs, the token counts, the ledger's dollars, and how much of all that is already in a month's tally. It is written at chosen moments, never on every event:
 
-- every `saveEvery` turns (10 by default; 0 turns this off),
+- every `saveEveryNNTurns` turns (10 by default; 0 turns this off),
 - at `session.end`, which shares one short time bound with everything else that runs at exit, and
 - by each of the commands.
 
@@ -244,7 +244,7 @@ A session with nothing in it (no turns, no subagent runs, no tokens, and a ledge
 
 The **month record**, under `month:<YYYY-MM>`, is the tally of every session that saved in that calendar month (local time): sessions, turns, subagent runs, tokens and dollars. At every save, the plugin takes what the session has added since its last save and adds it to the month of the save, then notes in the session record that it is banked. The next save adds only what came after, so a session saved ten times is counted once, and a save that adds nothing leaves the month alone. A session is counted among the month's sessions the first time it banks something into it; a session that straddles midnight on the last day of a month puts what it saved before into one month and the rest into the next. A record saved by 0.1.x, with no banked figure, banks its whole total at its next save.
 
-The two records have different lives, which is the point. Session records are dropped at `session.start` once older than `keepDays` (14 by default; this session's is never dropped), or all at once by `/receipt-clear`, so the store stays small whatever the number of sessions. Month records are kept for 12 months. Clearing the sessions loses nothing from the months, since everything saved was banked first.
+The two records have different lives, which is the point. Session records are dropped at `session.start` once older than `keepSessionDetailsNNDays` (14 by default; this session's is never dropped), or all at once by `/receipt-clear`, so the store stays small whatever the number of sessions. Month records are kept for 12 months. Clearing the sessions loses nothing from the months, since everything saved was banked first.
 
 ## Limitations
 
@@ -257,12 +257,12 @@ The two records have different lives, which is the point. Session records are dr
 - **Cents are rounded.** Under one dollar the receipt shows three decimals; under one cent it shows `<$0.01`.
 - **One text per turn.** Another plugin that answers `turn.complete` with its own text competes for the same place.
 - **Subagent runs are counted, not named.**
-- **A crash loses at most `saveEvery` turns** of the session's record and of the month. The session's dollars are not lost: the next save carries the whole session's figure.
-- **`/receipt-total` is of the session records still kept.** With the default `keepDays` of 14 it cannot look back further than two weeks; `/receipt-month` is the long view. A session that ended before the plugin was installed is in neither. The window is by the record's save time, not its start.
+- **A crash loses at most `saveEveryNNTurns` turns** of the session's record and of the month. The session's dollars are not lost: the next save carries the whole session's figure.
+- **`/receipt-total` is of the session records still kept.** With the default `keepSessionDetailsNNDays` of 14 it cannot look back further than two weeks; `/receipt-month` is the long view. A session that ended before the plugin was installed is in neither. The window is by the record's save time, not its start.
 - **A month's dollars are what this plugin watched.** They are the ledger's movement between saves, so a resumed session's spend from before the plugin was installed is in its session record (the whole ledger) but not in the month. A month is the local calendar month at the time of each save.
 - **A crash between the two writes of a save can count once more.** The month is written first, then the session record; a kill between them leaves the record saying less is banked than is, and the next save banks that part again. The window is two small writes.
 - **Session records are per plugin store.** Installing under a different plugin name or from a different folder starts a separate store.
-- **The store is capped at 4 MiB** by the host. A record is a few hundred bytes, session records are dropped after `keepDays` and months after 12, so ordinary use stays far below it.
+- **The store is capped at 4 MiB** by the host. A record is a few hundred bytes, session records are dropped after `keepSessionDetailsNNDays` and months after 12, so ordinary use stays far below it.
 - **The terminal only.** The receipt has not been checked on the desktop app's Code tab.
 
 
@@ -435,4 +435,4 @@ async with ClaudeSDKClient(options) as client:
 
 
 ## Origin and license
-This plugin began as an example mod in [anthropics/claude-code-playground](https://github.com/anthropics/claude-code-playground) (`claude-code/mods/turn-receipt`), built with Claude Fable 5.1 in Claude Code. The source files keep their Apache-2.0 headers. It is now maintained here as a stand-alone plugin, shared as-is, with no support or maintenance implied.
+This plugin began as an example mod in [anthropics/claude-code-playground](https://github.com/anthropics/claude-code-playground) (`claude-code/mods/turn-receipt`), built with Claude Fable 5.1 in Claude Code. The source files keep their Apache-2.0 headers, and this folder carries its own [LICENSE](LICENSE) with the Apache License 2.0 text; the rest of the repository is MIT. It is now maintained here as a stand-alone plugin, shared as-is, with no support or maintenance implied.

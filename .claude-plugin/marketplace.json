@@ -1,16 +1,16 @@
 {
-  "name": "jaime-claude-code-plugins",
+  "name": "jaime-rodriguez-claude-code-plugins",
   "owner": {
     "name": "Jaime Rodriguez"
   },
   "metadata": {
-    "description": "Plugins and mods for Claude Code, shared as-is."
+    "description": "Sample plugins and mods for Claude Code, shared as-is."
   },
   "plugins": [
     {
       "name": "turn-receipt",
       "source": "./turn-receipt",
-      "description": "A receipt beneath each answer: the turn's tokens and cost in US dollars, its subagents' share, and the session's running total. Keeps a monthly tally apart from the short-lived session records. Commands: /receipt shows and saves this session, /receipt-total sums the kept sessions, /receipt-month shows a month's tally, /receipt-clear drops the session records and keeps the months."
+      "description": "After each turn, it displays the turn's tokens and cost in US dollars, its subagents' share, and the session's running total. Commands: `/receipt` shows and saves the usage for this session, `/receipt-total <N>` sums the kept sessions over the last <N|14> days, `/receipt-month` shows a month's tally, `/receipt-clear` clears the per session turn data, but it keeps the aggregate of usage per month."
     }
   ]
 }
