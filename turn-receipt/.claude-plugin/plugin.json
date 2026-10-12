@@ -1,0 +1,45 @@
+{
+  "name": "turn-receipt",
+  "version": "0.2.3",
+  "description": "Prints a receipt beneath each answer: the turn's tokens and cost in US dollars, its subagents' share, and the session's running total. Keeps a monthly tally apart from the short-lived session records; /receipt-month shows it.",
+  "author": {
+    "name": "Claude Code DevRel"
+  },
+  "keywords": [
+    "mods",
+    "cost",
+    "tokens"
+  ],
+  "userConfig": {
+    "session": {
+      "type": "boolean",
+      "title": "Session total",
+      "description": "Also show the session's running total beside each turn: turns receipted, tokens summed and dollars.",
+      "default": true
+    },
+    "agents": {
+      "type": "boolean",
+      "title": "Subagent line",
+      "description": "Add a line for the subagent runs the turn made: runs, tokens and dollars. Off, their cost is folded into the turn's figure.",
+      "default": true
+    },
+    "saveEvery": {
+      "type": "number",
+      "title": "Save every N turns",
+      "description": "How many turns pass between saves of the session's total. 0 saves only at session end and on the commands.",
+      "default": 10
+    },
+    "keepDays": {
+      "type": "number",
+      "title": "Keep session records for N days",
+      "description": "How long saved session records are kept before they are dropped at session start. The monthly tallies are kept apart, for 12 months.",
+      "default": 14
+    },
+    "allowEmptyReceipts": {
+      "type": "boolean",
+      "title": "Allow empty receipts",
+      "description": "Also print a receipt, and count the turn, when the turn reported no usage and moved no ledger: an interrupt before any response, an API error. Its token counts read 0. Off, such a turn gets no receipt and is not counted.",
+      "default": false
+    }
+  }
+}
