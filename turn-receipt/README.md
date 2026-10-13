@@ -22,7 +22,7 @@ session  | 3 turns  | 2 agent runs  | 1.5M tokens  | $0.52
   - [Debug](#debug)
   - [Release a new version](#release-a-new-version)
   - [How it works](#how-it-works)
-  - [Limitations](#limitations)
+  - [Known Limitations](#known-limitations)
   - [Using turn-receipt with the Agent SDK](#using-turn-receipt-with-the-agent-sdk)
     - [Requirements](#requirements)
     - [Two ways to load it, and where the receipts go](#two-ways-to-load-it-and-where-the-receipts-go)
@@ -105,13 +105,12 @@ This repository is a plugin marketplace (see `.claude-plugin/marketplace.json` a
 /plugin install turn-receipt --marketplace jaimerodriguez/claude-code-plugins
 ```
 
-Answer `y` to add the marketplace, pick a scope (user is first), and set the options or keep their defaults. The hooks run in that session from then on, and in every later session under the chosen scope.
+Answer `y` to add the marketplace, pick a scope (user is first), and set the options or keep their defaults. 10 is a good default for `Save every NN turns`; a good default for `Keep detailed session records` is 14 days. 
 
 From a shell instead:
-
 ```bash
 claude plugin marketplace add jaimerodriguez/claude-code-plugins
-claude plugin install turn-receipt@jaime-claude-code-plugins --scope user
+claude plugin install turn-receipt@jaime-rodriguez-claude-code-plugins --scope user
 ```
 
 To update later:
@@ -200,7 +199,7 @@ If the plugin is installed from this repository's folder as a local marketplace 
 - **`cost n/a` in the receipt** means the host keeps no cost ledger. The CLI always has one.
 - **Read the start trace.** At `session.start` the module prints to the console the host's process id (so you can attach a debugger to it; a hooks module has no `process` global, so the id is a child's `$PPID`), what this session's record had banked, and one line per month record kept. Where there is no console the lines go to the debug log instead.
 - **Check the saved records.** `/receipt` prints and saves this session's record; `/receipt-total` reads the session records back and `/receipt-month` the month records. The store is a file of the plugin's own under the Claude Code configuration directory, keyed `session:<id>` and `month:<YYYY-MM>`. `claude plugin list --json --data-size turn-receipt` reports its size; `/receipt-clear` drops every session record but this one and keeps the months.
-- **Options not taking effect?** Plugin options are read from user settings, `--settings`, or managed settings, never a project's `.claude/settings.json`. The debug log says so on load: `no pluginConfigs["turn-receipt" or "turn-receipt@inline"].options ...; every option is its default`.
+- **Options not taking effect?** Plugin options are read from user settings, `--settings`, or managed settings, never a project's `.claude/settings.json`. 
 - **Reproduce in a test before fixing.** `hooks/turn-receipt.test.ts` already drives every event the module hooks. Copy the closest test, move the fake ledger or usage to match the case, and assert on the text or on the `Map` behind the store.
 
 ## Release a new version
@@ -246,7 +245,7 @@ The **month record**, under `month:<YYYY-MM>`, is the tally of every session tha
 
 The two records have different lives, which is the point. Session records are dropped at `session.start` once older than `keepSessionDetailsNNDays` (14 by default; this session's is never dropped), or all at once by `/receipt-clear`, so the store stays small whatever the number of sessions. Month records are kept for 12 months. Clearing the sessions loses nothing from the months, since everything saved was banked first.
 
-## Limitations
+## Known Limitations
 
 - **The dollar figure is the host's ledger**, what `/cost` reports: list price unless the host is configured with its own pricing. On a subscription it is shown, but it is not what you are billed.
 - **A turn's cost is a delta.** Anything else that moves the ledger during a window (a compaction's own request, a plugin's own model call) is credited to whichever loop's event ended that window.
@@ -257,12 +256,12 @@ The two records have different lives, which is the point. Session records are dr
 - **Cents are rounded.** Under one dollar the receipt shows three decimals; under one cent it shows `<$0.01`.
 - **One text per turn.** Another plugin that answers `turn.complete` with its own text competes for the same place.
 - **Subagent runs are counted, not named.**
-- **A crash loses at most `saveEveryNNTurns` turns** of the session's record and of the month. The session's dollars are not lost: the next save carries the whole session's figure.
+- **A crash or forced termination loses at most `saveEveryNNTurns` turns** of the session's record and of the month. The session's dollars are not lost: the next save carries the whole session's figure.
 - **`/receipt-total` is of the session records still kept.** With the default `keepSessionDetailsNNDays` of 14 it cannot look back further than two weeks; `/receipt-month` is the long view. A session that ended before the plugin was installed is in neither. The window is by the record's save time, not its start.
 - **A month's dollars are what this plugin watched.** They are the ledger's movement between saves, so a resumed session's spend from before the plugin was installed is in its session record (the whole ledger) but not in the month. A month is the local calendar month at the time of each save.
 - **A crash between the two writes of a save can count once more.** The month is written first, then the session record; a kill between them leaves the record saying less is banked than is, and the next save banks that part again. The window is two small writes.
 - **Session records are per plugin store.** Installing under a different plugin name or from a different folder starts a separate store.
-- **The store is capped at 4 MiB** by the host. A record is a few hundred bytes, session records are dropped after `keepSessionDetailsNNDays` and months after 12, so ordinary use stays far below it.
+- **The store is capped at 4 MiB** by the host. A record is a few hundred bytes, session records are dropped after `keepSessionDetailsNNDays`. Months stats last 12 months -but they are a single record per month-. Ordinary use should stay far below the limit.
 - **The terminal only.** The receipt has not been checked on the desktop app's Code tab.
 
 
