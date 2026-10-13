@@ -2,6 +2,23 @@
 
 All notable changes to this plugin are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-10-13
+
+### Added
+
+- A `renderReceiptAs` option (`userConfig`, one of `ui`, `text`, `none`; default `ui`) that picks how the receipt reaches you:
+  - `ui`: a `ui.render` hook on the `TurnDuration` row, the line that closes each turn, draws the duration line and then the receipt as markdown, one list item per line shown (receipt, agents, session, as `showSessionTotals` and `showSubAgentDetails` allow), the numbers in bold. Terminal only.
+  - `text`: the receipt is one plain line, its sections joined by ` // `, returned as the `turn.complete` text, as in 0.3.0.
+  - `none`: the receipt is not shown each turn. The turns are still tallied, saved and banked, and the tally is available from `/receipt`, `/receipt-total` and `/receipt-month` or from the store files. Only the `ui.render` hook is left unregistered.
+
+### Changed
+
+- **Breaking for SDK harnesses:** the default receipt is drawn by `ui.render`, which a headless or SDK session has no surface for, so with `ui` such a session gets no receipt message. Set `renderReceiptAs` to `text` to keep the one `informational` message, or read the tally with the commands. The README's SDK section says so.
+- With `text`, the sections are joined by ` // `, not `\n`. The engine replaces every line break in a hook's returned text with `U+FFFD` (checked on 2.1.296, in the terminal and headless, for `\n`, `\r\n`, `\r`, U+2028, U+2029, U+0085, VT and FF), so a stray character sat between them.
+- Token counts read `in:1.2k | out:348 | cache read:98.3k | cache write:12.1k` in `text` and in `/receipt`, `/receipt-total` and `/receipt-month`, with a colon and no space after the label; in the markdown they read `in **1.2k** · out **348**`.
+- The field separator is ` | ` (one space either side), where it was `  | `; the markdown uses ` · `.
+- The model is shown without its `claude-` prefix, as a field of its own after the cost: `| sonnet-5-5` for `claude-sonnet-5-5`. Before, it trailed the cost in parentheses with no separator. Any date suffix is kept.
+
 ## [0.3.0] - 2026-10-12
 
 ### Added

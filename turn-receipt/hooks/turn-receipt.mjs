@@ -5,8 +5,14 @@
 //
 // turn.complete (main loop): read the turn's token counts from e.usage (what
 // the API reported, summed over the turn's requests) and the session's cost
-// from $.session.usage() (the same ledger /cost totals). Return the receipt as
-// the hook's text, which the engine shows beneath the answer.
+// from $.session.usage() (the same ledger /cost totals). Keep the receipt as
+// markdown, the answer passed through untouched. With `renderReceiptAs` "ui", a
+// ui.render hook on the TurnDuration row (the line that closes the turn) draws
+// that markdown beneath the turn's duration: one list item per section, the
+// numbers in bold. "text" returns the receipt instead as the hook's text, one
+// line (the engine replaces every line break in it), plain. "none" shows
+// nothing each turn; only the ui.render hook is left unregistered, every other
+// hook stays, so the tally, the saves and the commands go on.
 // turn.complete (a subagent's run, e.agentId set): count the run and its
 // tokens toward the current main turn's "agents" line.
 // agent.spawn: take a ledger reading before the subagent starts.
@@ -65,11 +71,20 @@
 // `allowEmptyReceipts`, off by default, prints a receipt (and counts the
 // turn) when the turn reported no usage and moved no ledger, such as an
 // interrupt before any response; its token counts read 0.
+// `renderReceiptAs`: "ui" (default) draws the receipt as markdown with a
+// ui.render hook on TurnDuration; "text" returns it as the turn.complete text,
+// one line; "none" only tallies and saves. The receipt's lines follow the
+// options above: the turn, its subagents (when shown and there were runs) and
+// the session (when shown).
 //
 // The host reads on(...) and $.noun.method(...) from source, so they are
 // spelled literally, and helpers that take $ are top-level functions.
 
-const SEP = "  | ";
+const SEP = " | ";
+const DOT = " · ";
+const SECTION_SEP = " // ";
+const RENDER_MODES = ["ui", "text", "none"];
+const MODEL_PREFIX = "claude-";
 const KEY = "session:";
 const MONTH_KEY = "month:";
 const KEEP_MONTHS = 12;
@@ -77,12 +92,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const SAVE_EVERY_DEFAULT = 10;
 const KEEP_DAYS_DEFAULT = 14;
 const ALLOW_EMPTY_RECEIPTS_DEFAULT = false;
+const RENDER_AS_DEFAULT = "ui";
+const KEEP_DRAWN = 200;
 
 let showSession = true;
 let showAgents = true;
 let saveEvery = SAVE_EVERY_DEFAULT;
 let keepDays = KEEP_DAYS_DEFAULT;
 let allowEmptyReceipts = ALLOW_EMPTY_RECEIPTS_DEFAULT;
+let renderAs = RENDER_AS_DEFAULT;
+
+// The latest turn's receipt, as markdown, until a TurnDuration row claims it;
+// and the receipts the rows already drew, by row, so a redraw keeps its own.
+let pending = null;
+const drawn = new Map();
 
 // This session's id and when it began, from session.start; null before it.
 let sessionId = null;
@@ -108,6 +131,7 @@ export function register(on, options) {
   saveEvery = Math.max(0, Math.floor(Number(options?.saveEveryNNTurns ?? SAVE_EVERY_DEFAULT)) || 0);
   keepDays = Math.max(1, Math.floor(Number(options?.keepSessionDetailsNNDays ?? KEEP_DAYS_DEFAULT)) || KEEP_DAYS_DEFAULT);
   allowEmptyReceipts = options?.allowEmptyReceipts === true;
+  renderAs = RENDER_MODES.includes(options?.renderReceiptAs) ? options.renderReceiptAs : RENDER_AS_DEFAULT;
 
   on("session.start", async ($, e, next) => {
     const result = await next(e);
@@ -194,6 +218,7 @@ export function register(on, options) {
       return result;
     }
 
+    pending = null;
     turn.mainUsd = addUsd(turn.mainUsd, delta);
     if (!usage && turn.mainUsd === null && turn.agentRuns === 0 && !allowEmptyReceipts) {
       return result;
@@ -202,13 +227,54 @@ export function register(on, options) {
     if (usage) {
       session.mainTokens = addTokens(session.mainTokens, usage);
     }
-    const text = receipt(usage, turn, session, lastUsd);
+    const lines = renderAs === "none" ? [] : receiptLines(usage, turn, session, lastUsd, renderAs === "ui");
     turn = emptyTurn();
     if (saveEvery > 0 && session.turns % saveEvery === 0) {
       await save($);
     }
-    return { ...result, text };
+    if (renderAs === "ui") {
+      pending = lines.map((line) => `- ${line}`).join("\n");
+    } else if (renderAs === "text") {
+      // One line: the engine replaces every line break in a hook's text.
+      return { ...result, text: lines.join(SECTION_SEP) };
+    }
+    return result;
   });
+
+  if (renderAs === "ui") {
+    // The row that closes a turn. It claims the receipt the turn left, once;
+    // a redraw of the same row gets the same receipt back. A row with none
+    // (an empty turn, a subagent's) is the engine's own.
+    on("ui.render", { component: "TurnDuration" }, async ($, e, next) => {
+      const id = String(e.requestId ?? "");
+      let text = drawn.get(id);
+      if (text === undefined && pending !== null) {
+        text = pending;
+        pending = null;
+        drawn.set(id, text);
+        if (drawn.size > KEEP_DRAWN) {
+          drawn.delete(drawn.keys().next().value);
+        }
+      }
+      if (text === undefined) {
+        return next(e);
+      }
+      const { Box, Text, Markdown } = $.ui.resolve(e);
+      return Box({
+        flexDirection: "column",
+        children: [
+          Text({ dimColor: true, children: `${e.props.word} for ${duration(e.props.durationMs)}` }),
+          Markdown({ text }),
+        ],
+      });
+    });
+  }
+}
+
+// The turn's length as the closing line says it: `3s`, `1m 4s`.
+function duration(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  return total < 60 ? `${total}s` : `${Math.floor(total / 60)}m ${total % 60}s`;
 }
 
 // ---- persistence ----
@@ -515,56 +581,67 @@ async function ledgerDelta($) {
   return delta;
 }
 
-export function receipt(usage, t, s, sessionUsd) {
+// The receipt's lines: the turn, its subagents (when shown and there were
+// runs) and the session (when shown). With `md`, as markdown, the numbers in
+// bold and the fields joined by ·; else plain, `in:200`, joined by |.
+export function receiptLines(usage, t, s, sessionUsd, md) {
   const lines = [];
+  const sep = md ? DOT : SEP;
+  const b = (x) => (md ? `**${x}**` : String(x));
+  const fmt = md ? b : undefined;
   const agentsShown = showAgents && t.agentRuns > 0;
   // With the agents line off, the turn's figure is the whole turn, agents included.
   const turnUsd = agentsShown ? t.mainUsd : addUsd(t.mainUsd, t.agentUsd);
+  const tag = (model) => (model ? `${sep}${shortModel(model)}` : "");
 
   // No usage reads as zeros, so the line keeps its shape for anything parsing it.
-  const main = ["receipt", ...tokenParts(usage ?? emptyTokens()), dollars(turnUsd)];
-  lines.push(main.join(SEP) + modelTag(usage?.model));
+  const main = [b("receipt"), ...tokenParts(usage ?? emptyTokens(), fmt), b(dollars(turnUsd))];
+  lines.push(main.join(sep) + tag(usage?.model));
 
   if (agentsShown) {
     const agents = [
-      "agents",
-      `${t.agentRuns} ${t.agentRuns === 1 ? "run" : "runs"}`,
-      ...tokenParts(t.agentTokens),
-      dollars(t.agentUsd),
-      `turn total ${dollars(addUsd(t.mainUsd, t.agentUsd))}`,
+      b("agents"),
+      `${b(t.agentRuns)} ${t.agentRuns === 1 ? "run" : "runs"}`,
+      ...tokenParts(t.agentTokens, fmt),
+      b(dollars(t.agentUsd)),
+      `turn total ${b(dollars(addUsd(t.mainUsd, t.agentUsd)))}`,
     ];
-    lines.push(agents.join(SEP) + modelTag(t.agentModel));
+    lines.push(agents.join(sep) + tag(t.agentModel));
   }
 
   if (showSession) {
-    const parts = ["session", `${s.turns} ${s.turns === 1 ? "turn" : "turns"}`];
+    const parts = [b("session"), `${b(s.turns)} ${s.turns === 1 ? "turn" : "turns"}`];
     if (s.agentRuns > 0) {
-      parts.push(`${s.agentRuns} agent ${s.agentRuns === 1 ? "run" : "runs"}`);
+      parts.push(`${b(s.agentRuns)} agent ${s.agentRuns === 1 ? "run" : "runs"}`);
     }
-    parts.push(`${short(sum(addTokens(s.mainTokens, s.agentTokens)))} tokens`);
-    parts.push(dollars(sessionUsd));
-    lines.push(parts.join(SEP));
+    parts.push(`${b(short(sum(addTokens(s.mainTokens, s.agentTokens))))} tokens`);
+    parts.push(b(dollars(sessionUsd)));
+    lines.push(parts.join(sep));
   }
 
-  return lines.join("\n");
+  return lines;
 }
 
-function tokenParts(usage) {
+// `in:1.2k`, `out:348` and the cache counts shown; with `fmt`, as markdown
+// does it, `in **1.2k**`.
+function tokenParts(usage, fmt) {
   if (!usage) {
     return [];
   }
-  const parts = [`in ${short(usage.input_tokens)}`, `out ${short(usage.output_tokens)}`];
+  const part = (label, n) => (fmt ? `${label} ${fmt(short(n))}` : `${label}:${short(n)}`);
+  const parts = [part("in", usage.input_tokens), part("out", usage.output_tokens)];
   if (usage.cache_read_input_tokens > 0) {
-    parts.push(`cache read ${short(usage.cache_read_input_tokens)}`);
+    parts.push(part("cache read", usage.cache_read_input_tokens));
   }
   if (usage.cache_creation_input_tokens > 0) {
-    parts.push(`cache write ${short(usage.cache_creation_input_tokens)}`);
+    parts.push(part("cache write", usage.cache_creation_input_tokens));
   }
   return parts;
 }
 
-function modelTag(model) {
-  return model ? `  (${model})` : "";
+// Every model id starts with "claude-"; the receipt shows the rest.
+export function shortModel(model) {
+  return model.startsWith(MODEL_PREFIX) && model.length > MODEL_PREFIX.length ? model.slice(MODEL_PREFIX.length) : model;
 }
 
 function emptyTurn() {

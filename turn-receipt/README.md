@@ -3,10 +3,12 @@
 Turn receipt is a Claude Code mod that prints a receipt beneath each response from an LLM. It prints: what the turn cost in tokens and US dollars, what its subagents cost, and what the session has cost so far. It also saves each session's total, keeps a tally per calendar month that outlives the session records, and sums either on demand.
 
 ```text
-receipt  | in 200  | out 50  | cache read 13.9k  | $0.030  (claude-sonnet-4-5-20250929)
-agents  | 2 runs  | in 1k  | out 200  | cache read 40.2k  | $0.050  | turn total $0.080  (claude-haiku-4-5-20251001)
-session  | 3 turns  | 2 agent runs  | 1.5M tokens  | $0.52
+- receipt · in 200 · out 50 · cache read 13.9k · $0.030 · sonnet-4-5-20250929
+- agents · 2 runs · in 1k · out 200 · cache read 40.2k · $0.050 · turn total $0.080 · haiku-4-5-20251001
+- session · 3 turns · 2 agent runs · 1.5M tokens · $0.52
 ```
+
+The receipt is drawn with a `ui.render` hook on the row that closes each turn (the `Baked for 3s` line), as markdown: one list item per section, the numbers in bold (shown plain above). The `renderReceiptAs` option picks `ui` (this), `text` (one plain line returned as the turn's text, sections joined by ` // `) or `none` (not shown each turn; the turns are still tallied and saved, and the commands and store files give the tally). The model is shown without its `claude-` prefix.
 
 ## Contents
 
@@ -25,9 +27,8 @@ session  | 3 turns  | 2 agent runs  | 1.5M tokens  | $0.52
   - [Known Limitations](#known-limitations)
   - [Using turn-receipt with the Agent SDK](#using-turn-receipt-with-the-agent-sdk)
     - [Requirements](#requirements)
-    - [Two ways to load it, and where the receipts go](#two-ways-to-load-it-and-where-the-receipts-go)
-    - [The receipt message (in the SDK)](#the-receipt-message-in-the-sdk)
-    - [Catching the receipt (sample)](#catching-the-receipt-sample)
+    - [Two ways to load it, and where the receipts go](#two-ways-to-load-it-and-where-the-totals-go)
+    - [The receipt in the SDK](#the-receipt-in-the-sdk)
   - [Origin and license](#origin-and-license)
 
 ## What it shows
@@ -52,35 +53,38 @@ The numbers are real, not estimated. The token counts come from the `turn.comple
 ```text
 /receipt-total
 Last 14 days: 9 sessions
-  turns 61  | agent runs 9  | $13.40
-  tokens 12.1M: in 390.2k  | out 131.7k  | cache read 11.0M  | cache write 602.4k
+  turns 61 | agent runs 9 | $13.40
+  tokens 12.1M: in:390.2k | out:131.7k | cache read:11.0M | cache write:602.4k
 ```
 
 ```text
 /receipt-month 
 2026-10: 12 sessions
-  turns 184  | agent runs 31  | $42.17
-  tokens 38.6M: in 1.2M  | out 410.5k  | cache read 35.1M  | cache write 1.9M
+  turns 184 | agent runs 31 | $42.17
+  tokens 38.6M: in:1.2M | out:410.5k | cache read:35.1M | cache write:1.9M
 Earlier months:
-  2026-09  | 40 sessions  | 612 turns  | $131.08
+  2026-09 | 40 sessions | 612 turns | $131.08
 ```
 
 ## Options
 
-Five options, declared in the manifest's `userConfig`. Each is a row in `/config` under the plugin's name. Changing one there reloads the module with the new value.
+Six options, declared in the manifest's `userConfig`. Each is a row in `/config` under the plugin's name. Changing one there reloads the module with the new value.
 
 | Option | `/config` row | Type | Default | What it does |
 |--------|---------------|------|---------|--------------|
+| `renderReceiptAs` | Render the receipt as | `ui` \| `text` \| `none` | `ui` | `ui`: a `ui.render` hook on the `TurnDuration` row draws markdown beneath the turn's duration, a bold-numbered list item per line shown (terminal only). `text`: one plain line, `receipt \| in:200 \| … // session \| …`, returned as the `turn.complete` text, which the engine shows beneath the answer and an SDK harness reads as one `informational` message. `none`: the receipt is not shown each turn. The tally, the saves and the commands go on, so get the tally with `/receipt`, `/receipt-total` and `/receipt-month`, or from the store files. No `ui.render` hook is registered; every other hook is. |
 | `showSessionTotals` | Show Session Totals | boolean | `true` | Adds the session line to each receipt. |
 | `showSubAgentDetails` | Show Subagent Details | boolean | `true` | Adds the agents line when the turn ran subagents. Off, the subagents' dollars are folded into the receipt line's figure, so it is the whole turn's. |
 | `saveEveryNNTurns` | Save every NN turns | number | `10` | Saves the session's record every NN main-loop turns. A turn is one prompt through to Claude's final answer, whatever it ran inside; subagent runs do not count. If the session crashes or is force-terminated, the interim saves keep most of its data: you lose at most those NN turns. `0` saves only at session end and on the commands. |
 | `keepSessionDetailsNNDays` | Keep detailed session records for NN days | number | `14` | How long session records are kept before `session.start` drops them. The monthly tallies are kept apart, for 12 months, so a short window loses nothing from them. |
 | `allowEmptyReceipts` | Allow empty receipts | boolean | `false` | Also prints a receipt, and counts the turn, when the turn reported no usage and moved no ledger: an interrupt before any response, an API error. Its token counts read `0`, so the line keeps its shape for anything parsing it. Off, such a turn gets no receipt and is not counted. On, every turn has a receipt, which helps when matching them against other logs. |
 
-With `showSessionTotals` and `showSubAgentDetails` off, the receipt is one line, the turn alone:
+The receipt's lines follow the options: the turn's `receipt` line always, `agents` when `showSubAgentDetails` is on and the turn ran subagents, `session` when `showSessionTotals` is on.
+
+With `showSessionTotals` and `showSubAgentDetails` off, the receipt is a single section, the turn alone:
 
 ```text
-receipt  | in 200  | out 50  | cache read 13.9k  | $0.080  (claude-sonnet-4-5-20250929)
+- receipt · in 200 · out 50 · cache read 13.9k · $0.080 · sonnet-4-5-20250929
 ```
 
 The options in `~/.claude/settings.json` (project settings are not read for plugin options):
@@ -88,7 +92,7 @@ The options in `~/.claude/settings.json` (project settings are not read for plug
 ```json
 "pluginConfigs": {
   "turn-receipt": {
-    "options": { "showSessionTotals": true, "showSubAgentDetails": true, "saveEveryNNTurns": 10, "keepSessionDetailsNNDays": 14, "allowEmptyReceipts": false }
+    "options": { "showSessionTotals": true, "showSubAgentDetails": true, "saveEveryNNTurns": 10, "keepSessionDetailsNNDays": 14, "allowEmptyReceipts": false, "renderReceiptAs": "ui" }
   }
 }
 ```
@@ -132,6 +136,9 @@ turn-receipt/
 │   ├── hooks.json             names the hooks module: { "modules": ["./turn-receipt.mjs"] }
 │   ├── turn-receipt.mjs       the hooks module (all the logic)
 │   └── turn-receipt.test.ts   tests, run by `claude plugin test`
+├── .gitignore
+├── CHANGELOG.md               dated entries, Keep a Changelog format
+├── LICENSE                    Apache-2.0
 ├── tsconfig.json              extends the generated .claude-plugin/types/tsconfig.json
 └── README.md
 ```
@@ -175,7 +182,7 @@ claude -p "Reply with the single word OK." --plugin-dir ./turn-receipt --max-tur
 grep turn-receipt /tmp/turn-receipt-debug.log
 ```
 
-Point `--debug-file` outside the repository: Claude Code also writes a `latest` symlink beside the log. Expect lines like `hooks module turn-receipt@inline loaded` and `$.command.register (turn-receipt): /receipt listed`. Headless runs print only the answer; the receipt is drawn beneath it only in an interactive transcript.
+Point `--debug-file` outside the repository: Claude Code also writes a `latest` symlink beside the log. Expect lines like `hooks module turn-receipt@inline loaded` and `$.command.register (turn-receipt): /receipt listed`. In a headless `-p` run the printed output is only the answer; no receipt is drawn there (see [The receipt in the SDK](#the-receipt-in-the-sdk)).
 
 ## Run it from the folder while developing
 
@@ -195,7 +202,7 @@ If the plugin is installed from this repository's folder as a local marketplace 
 
 - **Run with `claude --debug`** (or `--debug-file <path>`) during development. The debug log has a line for every hook that was skipped and every result the engine refused, prefixed `turn-receipt:`. By default the log goes to `~/.claude/debug/<session-id>.txt`, with `~/.claude/debug/latest` pointing at the newest. Filter categories with `--debug "hooks"` to cut the noise.
 - **A failing hook is skipped, not fatal.** The chain continues without it, so a plugin that seems to do nothing has usually been told why in the log. While a `--plugin-dir` folder is watched, the transcript also shows one dim line naming the plugin, the event and the reason. The `agent.spawn` hook is a gating hook, so it has a `.catch` that passes the spawn on; keep that if you change it.
-- **No receipt beneath an answer?** The turn counted nothing (an interrupt before any response, an API error; turn `allowEmptyReceipts` on to receipt those too), or another plugin answered `turn.complete` with its own text and took the one place beneath the answer.
+- **No receipt beneath an answer?** The turn counted nothing (an interrupt before any response, an API error; turn `allowEmptyReceipts` on to receipt those too), or `renderReceiptAs` is `none`, or it is `ui` and the surface does not draw the `TurnDuration` row (raised on the terminal surface only; see [The receipt in the SDK](#the-receipt-in-the-sdk)), or another plugin's `ui.render` hook on that row answered with its own tree, or it is `text` and another plugin answered `turn.complete` with its own text and took the one place beneath the answer.
 - **`cost n/a` in the receipt** means the host keeps no cost ledger. The CLI always has one.
 - **Read the start trace.** At `session.start` the module prints to the console the host's process id (so you can attach a debugger to it; a hooks module has no `process` global, so the id is a child's `$PPID`), what this session's record had banked, and one line per month record kept. Where there is no console the lines go to the debug log instead.
 - **Check the saved records.** `/receipt` prints and saves this session's record; `/receipt-total` reads the session records back and `/receipt-month` the month records. The store is a file of the plugin's own under the Claude Code configuration directory, keyed `session:<id>` and `month:<YYYY-MM>`. `claude plugin list --json --data-size turn-receipt` reports its size; `/receipt-clear` drops every session record but this one and keeps the months.
@@ -215,11 +222,12 @@ If the plugin is installed from this repository's folder as a local marketplace 
 |------|--------------|
 | `session.start` | Registers the four commands, reads the ledger once (so a resumed session's earlier spend is not billed to its first turn), loads this session's saved record, and prunes session records older than `keepSessionDetailsNNDays` and months older than 12. |
 | `agent.spawn` | Reads the ledger and credits the movement to the main loop, then lets the spawn go on. |
-| `turn.complete` | A subagent's run (`agentId` set): credits the ledger's movement and the run's tokens to the agents. The main loop's turn: credits the movement to the main loop, returns the receipt as the hook's text, which the engine shows beneath the answer, starts the next turn's count, and saves every N turns. |
+| `turn.complete` | A subagent's run (`agentId` set): credits the ledger's movement and the run's tokens to the agents. The main loop's turn: credits the movement to the main loop, keeps the receipt as markdown for the turn's closing row (`renderReceiptAs` `ui`) or returns it as the hook's one-line text (`text`), starts the next turn's count, and saves every N turns. |
+| `ui.render` (`TurnDuration`) | Registered only with `renderReceiptAs` `ui`. Claims the receipt the turn left and draws it, the duration line first, then the markdown. A redraw of the same row gets the same receipt; a row with none is the engine's own. |
 | `session.end` | Banks into the month and saves the record one last time. |
 | `command.run` | Answers `/receipt`, `/receipt-total`, `/receipt-month` and `/receipt-clear`. |
 
-The plugin never rewrites the answer: a `turn.complete` hook's text is shown beneath the answer, and the transcript's record is unchanged.
+The plugin never rewrites the answer: it passes it through, and the receipt is drawn on the turn's closing row (`ui`) or is the hook's text beneath it (`text`).
 
 **Splitting dollars between loops.** The ledger is one figure for the whole session, so the plugin reads it at each spawn and at each turn's end, and credits each movement to the loop whose event ended the window:
 
@@ -275,12 +283,12 @@ The plugin works in a headless session driven by the Agent SDK.
   bundled binary (2.1.294) loads mods.  
 
 
-### Two ways to load it, and where the receipts go
+### Two ways to load it, and where the totals go
 A session that reads your user settings (the SDK's default) loads the
 installed plugin on its own, and there is nothing to do. A sealed session,
 `setting_sources=[]`, never reads those settings, so nothing installed loads
 unless the harness asks for it. The two ways of asking differ in where the
-receipts end up.
+totals are kept.
 
 The plugin keeps its ledger in a store file under `~/.claude/plugins/store/`.
 The file is named after the plugin's **identity**, and the identity depends
@@ -354,84 +362,15 @@ inline file stay there and are not merged; the file can be deleted once you
 no longer need those totals.
  
 
-### The receipt message (in the SDK)
+### The receipt in the SDK
 
-The receipt is the `turn.complete` hook's text. In a headless session the
-CLI sends it as a system message of subtype `informational`:
-
-- it arrives **after** the turn's `ResultMessage`, usually within
-  milliseconds;
-- `content` is prefixed with the hook chain's names
-  (`turn-receipt+cc-plugin-agents-md: `);
-- the newline between the receipt's lines comes through as U+FFFD
-  (observed on 2.1.294). Replace it before splitting lines;
-- the SDK's per-turn reader, `receive_response()`, stops at the
-  `ResultMessage`. Read that way and the receipt is still in the queue when
-  the turn ends: it surfaces at the head of the next turn's stream, or the last one can be lost if you disconnect from `ResultMessage`. 
-  See a sample below for how I wait for them.  You can implement something similar. 
-- a subagent run fires `turn.complete` too, but the plugin returns text only
-for the main loop's turn. One receipt per main turn; the subagents' share is
-the `agents` line inside it.
-
-
-### Catching the receipt (sample)
-
-Because the receipt follows the result, a harness needs three small things:
-one reader task that observes every message, a short wait after a turn so
-the receipt has landed, and a stamp that says which result each receipt
-followed. This covers all three:
-
-```python
-import asyncio, time
-from claude_agent_sdk import ClaudeSDKClient, ResultMessage, SystemMessage
-
-
-class Receipts:
-    def __init__(self):
-        self.results_seen = 0
-        self.notices: list[tuple[int, str]] = []
-
-    def observe(self, message):
-        """Feed every message through here, from the one reader task."""
-        if isinstance(message, ResultMessage):
-            self.results_seen += 1
-        elif isinstance(message, SystemMessage) and message.subtype == "informational":
-            text = message.data.get("content", "").replace("\ufffd", "\n")
-            self.notices.append((self.results_seen, text))
-            print(text)        # live, if you want it on the console
-
-    async def settle(self, timeout: float = 1.0):
-        """Wait for the latest result's receipt. The timeout is a safety net:
-        a receipt lands within milliseconds of its result."""
-        if self.results_seen == 0:
-            return
-        deadline = time.monotonic() + timeout
-        while self.for_turn(self.results_seen) is None and time.monotonic() < deadline:
-            await asyncio.sleep(0.02)
-
-    def for_turn(self, n: int) -> str | None:
-        # A receipt stamped n followed the n-th result, so it belongs to the
-        # n-th turn. Joining that to your own prompts or rows is your harness's job.
-        return next((text for k, text in reversed(self.notices) if k == n), None)
-
-
-async with ClaudeSDKClient(options) as client:
-    receipts = Receipts()
-
-    async def reader():
-        async for message in client.receive_messages():
-            receipts.observe(message)
-            ...                # your own handling of the stream
-
-    task = asyncio.create_task(reader())
-    ...                        # drive the session as usual
-    task.cancel()
-```
-
-`settle()` goes:
-- after a turn, before you read that turn's receipt with `for_turn(n)`;
-- once more before disconnecting, or the last receipt is cut off.
-
+The receipt is drawn by a `ui.render` hook, which a headless session has no
+surface to run: **with `renderReceiptAs` `ui`, an SDK harness receives no
+receipt message.** Set it to `text` and the receipt arrives as one
+`informational` system message instead. Either way the tally still runs and is
+saved at the usual points, so a harness can read it back with the commands,
+e.g. send `/receipt` after a turn and read the command's
+output, or `/receipt-total` and `/receipt-month` for the sums.
 
 ## Origin and license
 This plugin began as an example mod in [anthropics/claude-code-playground](https://github.com/anthropics/claude-code-playground) (`claude-code/mods/turn-receipt`), built with Claude Fable 5.1 in Claude Code. The source files keep their Apache-2.0 headers, and this folder carries its own [LICENSE](LICENSE) with the Apache License 2.0 text; the rest of the repository is MIT. It is now maintained here as a stand-alone plugin, shared as-is, with no support or maintenance implied.

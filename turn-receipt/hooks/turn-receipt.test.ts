@@ -84,6 +84,31 @@ const spawn = () => ({
 
 let store = new Map<string, unknown>();
 
+// The receipt the TurnDuration row draws for the turn just completed, as the
+// markdown the mod hands the Markdown element, split into its list items with
+// the list mark and the bold marks off; [] where the engine's own row stands.
+async function drawn($: any, props = { word: "Baked", durationMs: 1200 }) {
+  let ui;
+  try {
+    ui = await $.ui.mount({ plugin: "turn-receipt", surface: "terminal", component: "TurnDuration", props });
+  } catch {
+    // The mod drew nothing and the test has no engine row beneath it.
+    return [];
+  }
+  const md = await ui.find({ type: "Markdown" });
+  await ui.unmount();
+  return plain(md?.text ?? md?.props?.text ?? "");
+}
+
+const plain = (markdown: string) =>
+  markdown === "" ? [] : markdown.split("\n").map((l) => l.replace(/^- /, "").replaceAll("**", ""));
+
+// Completes a turn, then draws its row; the receipt's lines.
+async function complete($: any, t: ReturnType<typeof turn>) {
+  await $.turn.complete(t);
+  return drawn($);
+}
+
 function bottom(on: On, entries: Record<string, unknown> = {}) {
   store = memoryStore(on, entries);
   on("session.start", ($, e) => ({ cwd: e.cwd }));
@@ -118,22 +143,134 @@ function noLedger(on: On) {
   }));
 }
 
-test("shows the turn's tokens and cost beneath the answer", async ($, on) => {
+test("draws the turn's tokens and cost, and the session, as markdown with bold numbers", async ($, on) => {
   const state = { usd: 0 };
   ledger(on, state);
   await $.session.start(START);
 
   state.usd = 0.0431;
   const r = await $.turn.complete(turn("hello", usage(1200, 348, 98_300, 12_100)));
-  const [receipt, session] = r.text.split("\n");
+  expect(r.text).toBe("hello");
 
-  expect(receipt).toContain("in 1.2k");
-  expect(receipt).toContain("out 348");
-  expect(receipt).toContain("cache read 98.3k");
-  expect(receipt).toContain("cache write 12.1k");
-  expect(receipt).toContain("$0.043");
-  expect(receipt).toContain(`(${MODEL})`);
-  expect(session).toBe("session  | 1 turn  | 111.9k tokens  | $0.043");
+  const ui = await $.ui.mount({
+    plugin: "turn-receipt",
+    surface: "terminal",
+    component: "TurnDuration",
+    props: { word: "Baked", durationMs: 64_000 },
+  });
+  const md = await ui.find({ type: "Markdown" });
+  expect(md?.text ?? md?.props?.text).toBe(
+    [
+      "- **receipt** · in **1.2k** · out **348** · cache read **98.3k** · cache write **12.1k** · **$0.043** · haiku-4-5-20251001",
+      "- **session** · **1** turn · **111.9k** tokens · **$0.043**",
+    ].join("\n"),
+  );
+  expect(await ui.find({ type: "Text", text: "Baked for 1m 4s" })).toBeDefined();
+  await ui.unmount();
+});
+
+test("draws one line per section the options allow, and leaves the answer alone", async ($, on) => {
+  const state = { usd: 0 };
+  ledger(on, state);
+  await $.session.start(START);
+
+  state.usd = 0.02;
+  await $.agent.spawn(spawn());
+  state.usd = 0.07;
+  await $.turn.complete(turn("found", usage(500, 100), "agent-1"));
+  state.usd = 0.08;
+  const r = await $.turn.complete(turn("done", usage(200, 50)));
+
+  expect(r.text).toBe("done");
+  expect(await drawn($)).toEqual([
+    "receipt · in 200 · out 50 · $0.030 · haiku-4-5-20251001",
+    "agents · 1 run · in 500 · out 100 · $0.050 · turn total $0.080 · haiku-4-5-20251001",
+    "session · 1 turn · 1 agent run · 850 tokens · $0.080",
+  ]);
+});
+
+test("draws only the turn's line when the session and agents options are off", { options: { showSessionTotals: false, showSubAgentDetails: false } }, async ($, on) => {
+  const state = { usd: 0 };
+  ledger(on, state);
+  await $.session.start(START);
+
+  state.usd = 0.02;
+  await $.agent.spawn(spawn());
+  state.usd = 0.07;
+  await $.turn.complete(turn("found", usage(500, 100), "agent-1"));
+  state.usd = 0.08;
+  await $.turn.complete(turn("done", usage(200, 50)));
+
+  // The agents' dollars are folded into the turn's figure.
+  expect(await drawn($)).toEqual(["receipt · in 200 · out 50 · $0.080 · haiku-4-5-20251001"]);
+});
+
+test("draws nothing for a turn that counted nothing", async ($, on) => {
+  noLedger(on);
+  await $.session.start(START);
+
+  const r = await $.turn.complete(turn("interrupted"));
+  expect(r.text).toBe("interrupted");
+  expect(await drawn($)).toEqual([]);
+});
+
+test("draws a receipt for a turn without usage when allowEmptyReceipts is on", { options: { allowEmptyReceipts: true } }, async ($, on) => {
+  noLedger(on);
+  await $.session.start(START);
+
+  await $.turn.complete(turn("interrupted"));
+  expect(await drawn($)).toEqual([
+    "receipt · in 0 · out 0 · cost n/a",
+    "session · 1 turn · 0 tokens · cost n/a",
+  ]);
+});
+
+test("draws nothing, but still tallies and saves, when renderReceiptAs is none", { options: { renderReceiptAs: "none", saveEveryNNTurns: 1 } }, async ($, on) => {
+  const state = { usd: 0 };
+  ledger(on, state);
+  await $.session.start(START);
+
+  state.usd = 0.01;
+  const r = await $.turn.complete(turn("hi", usage(10, 5)));
+  expect(r.text).toBe("hi");
+  expect(await drawn($)).toEqual([]);
+
+  state.usd = 0.02;
+  await $.turn.complete(turn("again", usage(10, 5)));
+  expect(store.get("session:s1")).toMatchObject({ turns: 2, usd: 0.02 });
+  expect(store.get(`month:${MONTH}`)).toMatchObject({ sessions: 1, turns: 2, usd: 0.02 });
+});
+
+test("returns the receipt as one plain line of text when renderReceiptAs is text", { options: { renderReceiptAs: "text" } }, async ($, on) => {
+  const state = { usd: 0 };
+  ledger(on, state);
+  await $.session.start(START);
+
+  state.usd = 0.0431;
+  const r = await $.turn.complete(turn("hello", usage(1200, 348, 98_300, 12_100)));
+
+  expect(r.text).toBe(
+    "receipt | in:1.2k | out:348 | cache read:98.3k | cache write:12.1k | $0.043 | haiku-4-5-20251001 // session | 1 turn | 111.9k tokens | $0.043",
+  );
+  expect(await drawn($)).toEqual([]);
+});
+
+test("keeps a model id that is not a claude- one, or is only the prefix, as it is", async ($, on) => {
+  const state = { usd: 0 };
+  ledger(on, state);
+  await $.session.start(START);
+
+  expect((await complete($, turn("one", usage(1, 1, 0, 0, "gpt-x"))))[0]).toMatch(/· gpt-x$/);
+  expect((await complete($, turn("two", usage(1, 1, 0, 0, "claude-"))))[0]).toMatch(/· claude-$/);
+});
+
+test("shows a model's name without the claude- prefix", async ($, on) => {
+  const state = { usd: 0 };
+  ledger(on, state);
+  await $.session.start(START);
+
+  const lines = await complete($, turn("one", usage(10, 5, 0, 0, "claude-sonnet-5-5")));
+  expect(lines[0]).toBe("receipt · in 10 · out 5 · $0.00 · sonnet-5-5");
 });
 
 test("charges each turn only the ledger's movement and keeps a session total", async ($, on) => {
@@ -142,14 +279,14 @@ test("charges each turn only the ledger's movement and keeps a session total", a
   await $.session.start(START);
 
   state.usd = 1.52;
-  const first = await $.turn.complete(turn("one", usage(100, 50)));
-  expect(first.text).toContain("$0.020");
-  expect(first.text).toContain("session  | 1 turn  | 150 tokens  | $1.52");
+  const first = await complete($, turn("one", usage(100, 50)));
+  expect(first[0]).toContain("$0.020");
+  expect(first[1]).toBe("session · 1 turn · 150 tokens · $1.52");
 
   state.usd = 2.6;
-  const second = await $.turn.complete(turn("two", usage(100, 50)));
-  expect(second.text).toContain("$1.08");
-  expect(second.text).toContain("session  | 2 turns  | 300 tokens  | $2.60");
+  const second = await complete($, turn("two", usage(100, 50)));
+  expect(second[0]).toContain("$1.08");
+  expect(second[1]).toBe("session · 2 turns · 300 tokens · $2.60");
 });
 
 test("shows the turn alone when the session option is off", { options: { showSessionTotals: false } }, async ($, on) => {
@@ -160,12 +297,12 @@ test("shows the turn alone when the session option is off", { options: { showSes
   state.usd = 0.02;
   await $.turn.complete(turn("one", usage(100, 50)));
   state.usd = 0.05;
-  const r = await $.turn.complete(turn("two", usage(100, 50)));
+  const lines = await complete($, turn("two", usage(100, 50)));
 
-  expect(r.text).toContain("in 100");
-  expect(r.text).toContain("$0.030");
-  expect(r.text).not.toContain("session");
-  expect(r.text).not.toContain("\n");
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain("in 100");
+  expect(lines[0]).toContain("$0.030");
+  expect(lines.join("\n")).not.toContain("session");
 });
 
 test("splits a turn between the main loop and its subagents", async ($, on) => {
@@ -184,19 +321,19 @@ test("splits a turn between the main loop and its subagents", async ($, on) => {
   await $.turn.complete(turn("found b", usage(500, 100), "agent-1"));
   // The main loop spends 1 more cent answering.
   state.usd = 0.08;
-  const r = await $.turn.complete(turn("done", usage(200, 50)));
-  const [receipt, agents, session] = r.text.split("\n");
+  const [receipt, agents, session, ...rest] = await complete($, turn("done", usage(200, 50)));
 
+  expect(rest).toEqual([]);
   expect(receipt).toContain("in 200");
   expect(receipt).toContain("$0.030");
-  expect(agents).toBe(`agents  | 2 runs  | in 1k  | out 200  | $0.050  | turn total $0.080  (${MODEL})`);
-  expect(session).toBe("session  | 1 turn  | 2 agent runs  | 1.5k tokens  | $0.080");
+  expect(agents).toBe("agents · 2 runs · in 1k · out 200 · $0.050 · turn total $0.080 · haiku-4-5-20251001");
+  expect(session).toBe("session · 1 turn · 2 agent runs · 1.5k tokens · $0.080");
 
   // The next turn starts clean, and the session keeps counting.
   state.usd = 0.09;
-  const next = await $.turn.complete(turn("more", usage(100, 10)));
-  expect(next.text).not.toContain("agents  |");
-  expect(next.text).toContain("session  | 2 turns  | 2 agent runs  | 1.6k tokens  | $0.090");
+  const next = await complete($, turn("more", usage(100, 10)));
+  expect(next.some((l) => l.startsWith("agents ·"))).toBe(false);
+  expect(next).toContain("session · 2 turns · 2 agent runs · 1.6k tokens · $0.090");
 });
 
 test("folds subagents into the turn when the agents option is off", { options: { showSubAgentDetails: false } }, async ($, on) => {
@@ -209,11 +346,11 @@ test("folds subagents into the turn when the agents option is off", { options: {
   state.usd = 0.07;
   await $.turn.complete(turn("found", usage(500, 100), "agent-1"));
   state.usd = 0.08;
-  const r = await $.turn.complete(turn("done", usage(200, 50)));
+  const r = await complete($, turn("done", usage(200, 50)));
 
-  expect(r.text).not.toContain("agents  |");
-  expect(r.text).toContain("receipt  | in 200  | out 50  | $0.080");
-  expect(r.text).toContain("session  | 1 turn  | 1 agent run  | 850 tokens  | $0.080");
+  expect(r.some((l) => l.startsWith("agents ·"))).toBe(false);
+  expect(r).toContain("receipt · in 200 · out 50 · $0.080 · haiku-4-5-20251001");
+  expect(r).toContain("session · 1 turn · 1 agent run · 850 tokens · $0.080");
 });
 
 test("says cost n/a where the host keeps no ledger", async ($, on) => {
@@ -222,12 +359,11 @@ test("says cost n/a where the host keeps no ledger", async ($, on) => {
 
   await $.agent.spawn(spawn());
   await $.turn.complete(turn("found", usage(500, 100), "agent-1"));
-  const r = await $.turn.complete(turn("hi", usage(10, 5)));
-  const [receipt, agents, session] = r.text.split("\n");
+  const [receipt, agents, session] = await complete($, turn("hi", usage(10, 5)));
 
-  expect(receipt).toBe(`receipt  | in 10  | out 5  | cost n/a  (${MODEL})`);
-  expect(agents).toBe(`agents  | 1 run  | in 500  | out 100  | cost n/a  | turn total cost n/a  (${MODEL})`);
-  expect(session).toBe("session  | 1 turn  | 1 agent run  | 615 tokens  | cost n/a");
+  expect(receipt).toBe("receipt · in 10 · out 5 · cost n/a · haiku-4-5-20251001");
+  expect(agents).toBe("agents · 1 run · in 500 · out 100 · cost n/a · turn total cost n/a · haiku-4-5-20251001");
+  expect(session).toBe("session · 1 turn · 1 agent run · 615 tokens · cost n/a");
 });
 
 test("saves the session's total every N turns, at the end, and on /receipt", { options: { saveEveryNNTurns: 2 } }, async ($, on) => {
@@ -257,8 +393,8 @@ test("saves the session's total every N turns, at the end, and on /receipt", { o
   await $.turn.complete(turn("three", usage(100, 50)));
   const shown = await $.command.run(run("receipt"));
   expect(shown.text).toContain("This session (s1):");
-  expect(shown.text).toContain("turns 3  | agent runs 0  | $0.030");
-  expect(shown.text).toContain("tokens 450: in 300  | out 150");
+  expect(shown.text).toContain("turns 3 | agent runs 0 | $0.030");
+  expect(shown.text).toContain("tokens 450: in:300 | out:150");
   expect(shown.text).toContain("Saved.");
   expect(store.get("session:s1")).toMatchObject({ turns: 3, usd: 0.03 });
 
@@ -276,7 +412,7 @@ test("does not save a session that has nothing in it", { options: { saveEveryNNT
 
   // Nothing yet: /receipt says so, and neither the record nor the month is written.
   const empty = await $.command.run(run("receipt"));
-  expect(empty.text).toContain("turns 0  | agent runs 0  | $0.00");
+  expect(empty.text).toContain("turns 0 | agent runs 0 | $0.00");
   expect(empty.text).toContain("Not saved: nothing to save yet.");
   expect(store.get("session:s1")).toBeUndefined();
   expect(store.get(`month:${MONTH}`)).toBeUndefined();
@@ -302,8 +438,7 @@ test("continues a saved session's count after a reload or resume", async ($, on)
   await $.session.start(START);
 
   state.usd = 1.1;
-  const r = await $.turn.complete(turn("more", usage(100, 50)));
-  expect(r.text).toContain("session  | 8 turns  | 2 agent runs  | 2.1k tokens  | $1.10");
+  expect(await complete($, turn("more", usage(100, 50)))).toContain("session · 8 turns · 2 agent runs · 2.1k tokens · $1.10");
 });
 
 test("totals the sessions saved in the last N days", { options: { keepSessionDetailsNNDays: 90 } }, async ($, on) => {
@@ -322,12 +457,12 @@ test("totals the sessions saved in the last N days", { options: { keepSessionDet
   const month = await $.command.run(run("receipt-total"));
   // s1 (this session, 0 turns, $0.50) is saved by the command and counted too.
   expect(month.text).toContain("Last 90 days: 3 sessions");
-  expect(month.text).toContain("turns 7  | agent runs 2  | $1.50");
-  expect(month.text).toContain("tokens 2.2k: in 2k  | out 200");
+  expect(month.text).toContain("turns 7 | agent runs 2 | $1.50");
+  expect(month.text).toContain("tokens 2.2k: in:2k | out:200");
 
   const week = await $.command.run(run("receipt-total", "7"));
   expect(week.text).toContain("Last 7 days: 2 sessions");
-  expect(week.text).toContain("turns 4  | agent runs 1  | $1.25");
+  expect(week.text).toContain("turns 4 | agent runs 1 | $1.25");
 
   const none = await $.command.run(run("receipt-total", "1"));
   expect(none.text).toContain("Last 1 day: 1 session");
@@ -345,16 +480,18 @@ test("passes the answer through when nothing counted", async ($, on) => {
   expect(r.text).toBe("interrupted");
 });
 
-test("receipts and counts a turn without usage when allowEmptyReceipts is on", { options: { allowEmptyReceipts: true } }, async ($, on) => {
+test("counts a turn without usage when allowEmptyReceipts is on", { options: { allowEmptyReceipts: true } }, async ($, on) => {
   noLedger(on);
   await $.session.start(START);
 
-  const r = await $.turn.complete(turn("interrupted"));
-  expect(r.text).toBe("receipt  | in 0  | out 0  | cost n/a\nsession  | 1 turn  | 0 tokens  | cost n/a");
+  expect(await complete($, turn("interrupted"))).toEqual([
+    "receipt · in 0 · out 0 · cost n/a",
+    "session · 1 turn · 0 tokens · cost n/a",
+  ]);
 
   // A later real turn goes on counting from there.
-  const next = await $.turn.complete(turn("hi", usage(10, 5)));
-  expect(next.text.split("\n")[1]).toBe("session  | 2 turns  | 15 tokens  | cost n/a");
+  const next = await complete($, turn("hi", usage(10, 5)));
+  expect(next[1]).toBe("session · 2 turns · 15 tokens · cost n/a");
 });
 
 test("banks each save's new turns into the month's tally once", { options: { saveEveryNNTurns: 2 } }, async ($, on) => {
@@ -418,10 +555,10 @@ test("a resumed session banks only what it spent since its last save", async ($,
   expect(store.get(`month:${MONTH}`)).toMatchObject({ sessions: 3, turns: 21, agentRuns: 5, usd: 4.5, tokens: tok(5100, 1050) });
   const [head, counts, tokens, label, earlier] = (r.text ?? "").split("\n");
   expect(head).toBe(`${MONTH}: 3 sessions`);
-  expect(counts).toBe("  turns 21  | agent runs 5  | $4.50");
-  expect(tokens).toBe("  tokens 6.2k: in 5.1k  | out 1.1k");
+  expect(counts).toBe("  turns 21 | agent runs 5 | $4.50");
+  expect(tokens).toBe("  tokens 6.2k: in:5.1k | out:1.1k");
   expect(label).toBe("Earlier months:");
-  expect(earlier).toBe("  1970-03  | 2 sessions  | 9 turns  | $0.500");
+  expect(earlier).toBe("  1970-03 | 2 sessions | 9 turns | $0.500");
 
   const named = await $.command.run(run("receipt-month", "1970-03"));
   expect(named.text).toContain("1970-03: 2 sessions");
