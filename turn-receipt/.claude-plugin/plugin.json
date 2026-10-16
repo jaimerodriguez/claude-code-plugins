@@ -1,6 +1,6 @@
 {
   "name": "turn-receipt",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "After each turn, it displays the turn's tokens and cost in US dollars, its subagents' share, and the session's running total. Commands: `/receipt` shows and saves the usage for this session, `/receipt-total N` sums the kept sessions over the last N days, `/receipt-month` shows a month's tally, `/receipt-clear` clears the per session turn data, but it keeps the aggregate of usage per month.",
   "author": {
     "name": "Jaime Rodriguez"
@@ -14,7 +14,7 @@
     "renderReceiptAs": {
       "type": "string",
       "title": "Render the receipt as",
-      "description": "How the receipt reaches you after each turn. ui: markdown beneath the turn's duration line, one line per section, numbers in bold (terminal only). text: one plain line returned as the turn's text, sections joined by //. none: the receipt is not shown each turn; get the tally with the /receipt commands or from the store files.",
+      "description": "How the receipt reaches you after each turn. ui: markdown, one line per section, numbers in bold: beneath the turn's duration line in the terminal, in the band above the prompt in the desktop app. text: one plain line returned as the turn's text, sections joined by //. none: the receipt is not shown each turn; get the tally with the /receipt commands or from the store files.",
       "options": [
         "ui",
         "text",

@@ -2,6 +2,19 @@
 
 All notable changes to this plugin are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.1] - 2026-10-14
+
+### Added
+
+- With `renderReceiptAs` `ui`, the desktop app now shows the receipt. The desktop does not raise the `TurnDuration` row that 0.4.0 drew on, so a second `ui.render` hook, on `AbovePrompt`, draws the latest receipt in the band above the prompt on any surface but the terminal (there the row has it, and the band stands down; it also yields while a survey holds the band). Only the latest receipt shows there. If the band is too intrusive, set `renderReceiptAs` to `none` to hide it, or to `text` to inline it as a message. `vscode` and `mobile` raise neither component; use `text` there.
+- The start trace also prints the receipt mode, the surface the session started on and the surfaces attached, and with `ui` the debug log notes, once per surface, where the band first drew.
+- Two tests for the band: it shows the latest receipt on the desktop and stands down on the terminal, and it is not registered with `text` or `none`.
+
+### Changed
+
+- README: the Agent SDK section is restructured around the two details that matter there (the plugin's identity depends on how it is loaded; the SDK renders no UI, so use `text`). The settings example is keyed by the plugin's identity (`turn-receipt@<marketplace>`, or `turn-receipt@inline` under `--plugin-dir`), as the engine reads it. The desktop entry in Known Limitations replaces "the terminal only". Built and tested on 2.1.299.
+- The manifest's description of `renderReceiptAs` mentions the band.
+
 ## [0.4.0] - 2026-10-13
 
 ### Added

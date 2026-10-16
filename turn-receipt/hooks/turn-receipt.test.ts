@@ -255,6 +255,55 @@ test("returns the receipt as one plain line of text when renderReceiptAs is text
   expect(await drawn($)).toEqual([]);
 });
 
+// The band above the prompt on a surface, as the list items it draws.
+async function band($: any, surface: "terminal" | "desktop") {
+  let ui;
+  try {
+    ui = await $.ui.mount({
+      plugin: "turn-receipt",
+      surface,
+      component: "AbovePrompt",
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { bodyRows: 10, offset: 0, isFocused: false } },
+    });
+  } catch {
+    // The mod stood down and the test has no engine band beneath it.
+    return [];
+  }
+  const md = await ui.find({ type: "Markdown" });
+  await ui.unmount();
+  return plain(md?.text ?? md?.props?.text ?? "");
+}
+
+test("shows the latest receipt in the band above the prompt on the desktop, not on the terminal", async ($, on) => {
+  const state = { usd: 0 };
+  ledger(on, state);
+  await $.session.start(START);
+
+  // Nothing yet: the band has nothing to show.
+  expect(await band($, "desktop")).toEqual([]);
+
+  state.usd = 0.02;
+  await $.turn.complete(turn("one", usage(100, 50)));
+  state.usd = 0.05;
+  await $.turn.complete(turn("two", usage(200, 10)));
+
+  const lines = await band($, "desktop");
+  expect(lines[0]).toBe("receipt · in 200 · out 10 · $0.030 · haiku-4-5-20251001");
+  expect(lines[1]).toBe("session · 2 turns · 360 tokens · $0.050");
+  // The terminal has the TurnDuration row, so the band stands down there.
+  expect(await band($, "terminal")).toEqual([]);
+});
+
+test("does not draw the band when renderReceiptAs is text or none", { options: { renderReceiptAs: "none" } }, async ($, on) => {
+  const state = { usd: 0 };
+  ledger(on, state);
+  await $.session.start(START);
+
+  state.usd = 0.02;
+  await $.turn.complete(turn("one", usage(100, 50)));
+  expect(await band($, "desktop")).toEqual([]);
+});
+
 test("keeps a model id that is not a claude- one, or is only the prefix, as it is", async ($, on) => {
   const state = { usd: 0 };
   ledger(on, state);

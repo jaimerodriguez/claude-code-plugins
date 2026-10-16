@@ -7,8 +7,10 @@
 // the API reported, summed over the turn's requests) and the session's cost
 // from $.session.usage() (the same ledger /cost totals). Keep the receipt as
 // markdown, the answer passed through untouched. With `renderReceiptAs` "ui", a
-// ui.render hook on the TurnDuration row (the line that closes the turn) draws
-// that markdown beneath the turn's duration: one list item per section, the
+// ui.render hook on the TurnDuration row (the line that closes the turn; the
+// terminal only) draws that markdown beneath the turn's duration, and one on
+// AbovePrompt (the desktop app, where there is no such row) draws the latest
+// receipt in the band above the prompt: one list item per section, the
 // numbers in bold. "text" returns the receipt instead as the hook's text, one
 // line (the engine replaces every line break in it), plain. "none" shows
 // nothing each turn; only the ui.render hook is left unregistered, every other
@@ -107,6 +109,11 @@ let renderAs = RENDER_AS_DEFAULT;
 let pending = null;
 const drawn = new Map();
 
+// The latest receipt, as markdown, for the band above the prompt: the surfaces
+// that have no TurnDuration row (the desktop app) show it there.
+let latest = null;
+const bandSurfaces = new Set();
+
 // This session's id and when it began, from session.start; null before it.
 let sessionId = null;
 let startedAt = 0;
@@ -160,7 +167,7 @@ export function register(on, options) {
     await loadSession($);
     await prune($);
     try {
-      await trace($);
+      await trace($, e.surface);
     } catch {
       // Tracing never fails the start.
     }
@@ -234,6 +241,12 @@ export function register(on, options) {
     }
     if (renderAs === "ui") {
       pending = lines.map((line) => `- ${line}`).join("\n");
+      latest = pending;
+      // A surface other than the terminal draws the band, and nothing else
+      // tells it the receipt changed.
+      if ((await $.session.surfaces()).some((surface) => surface !== "terminal")) {
+        $.ui.invalidate("ui.render");
+      }
     } else if (renderAs === "text") {
       // One line: the engine replaces every line break in a hook's text.
       return { ...result, text: lines.join(SECTION_SEP) };
@@ -257,6 +270,11 @@ export function register(on, options) {
         }
       }
       if (text === undefined) {
+        // Remember the row had none, so a later redraw (the band's) does not
+        // hand it a newer turn's receipt.
+        drawn.set(id, null);
+      }
+      if (!text) {
         return next(e);
       }
       const { Box, Text, Markdown } = $.ui.resolve(e);
@@ -266,6 +284,25 @@ export function register(on, options) {
           Text({ dimColor: true, children: `${e.props.word} for ${duration(e.props.durationMs)}` }),
           Markdown({ text }),
         ],
+      });
+    });
+
+    // The terminal has the TurnDuration row above, so the band stands down
+    // there (and while a survey holds it). Elsewhere the band is where the
+    // latest receipt is.
+    on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
+      if (e.surface === "terminal" || e.props.hasSurvey || latest === null) {
+        return next(e);
+      }
+      if (!bandSurfaces.has(e.surface)) {
+        // Once per surface, so the debug log says where the band drew.
+        bandSurfaces.add(e.surface);
+        $.ui.log(`turn-receipt: AbovePrompt band drawn on surface ${e.surface}`, { to: "debug" });
+      }
+      const { Box, Text, Markdown } = $.ui.resolve(e);
+      return Box({
+        flexDirection: "column",
+        children: [Text({ dimColor: true, children: "Last turn" }), Markdown({ text: latest })],
       });
     });
   }
@@ -431,9 +468,9 @@ export function monthOf(ms, offset = 0) {
 // had banked, and every month record kept. A hooks module has no `process`
 // of its own, so the id is read from a child's $PPID; where the console is
 // missing, the lines go to the debug log. Never fails the start.
-async function trace($) {
+async function trace($, startSurface) {
   const lines = [
-    `turn-receipt session.start: host pid ${await hostPid($)}`,
+    `turn-receipt session.start: host pid ${await hostPid($)}, receipt ${renderAs}, surface ${startSurface ?? "none"}, attached ${(await surfaces($)).join(", ") || "none"}`,
     `  session ${sessionId ?? "(none)"}: turns ${session.turns}, agent runs ${session.agentRuns}, ledger ${dollars(lastUsd)}`,
     `  banked: turns ${banked.turns}, agent runs ${banked.agentRuns}, tokens ${sum(banked.tokens) + sum(banked.agentTokens)}, ${dollars(banked.usd)}, months ${banked.months.join(", ") || "none"}`,
   ];
@@ -457,6 +494,15 @@ async function trace($) {
     }
   } catch {
     // Nowhere to print: the start goes on.
+  }
+}
+
+// The surfaces the session draws on; none where the host cannot say.
+async function surfaces($) {
+  try {
+    return await $.session.surfaces();
+  } catch {
+    return [];
   }
 }
 
